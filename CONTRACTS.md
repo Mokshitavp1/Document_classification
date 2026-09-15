@@ -75,7 +75,7 @@ fine-tunes on a laptop, consistent with staying on-device. Whoever pulls it firs
 record the exact revision hash here immediately so the other person pins the same
 one:
 ```bash
-# nlpaueb/legal-bert-base-uncased, revision <fill in hash after first pull>
+# nlpaueb/legal-bert-base-uncased, revision 15b570cbf88259610b082a167dacc190124f60f6
 ```
 
 **Environment parity checklist (do this explicitly, don't assume):**
