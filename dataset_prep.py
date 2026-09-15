@@ -96,6 +96,26 @@ def load_and_filter_cuad_dataset(split="train"):
         
     return final_documents
 
+import json
+def load_custom_annotations(file_path: str):
+    """
+    Loads custom manual annotations (e.g., from the bootstrap pipeline).
+    Expected to be a JSON file with a list of documents matching the CUAD subset shape.
+    """
+    if not os.path.exists(file_path):
+        return []
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data
+
+def get_full_dataset(custom_annotations_path="bootstrap_labels_corrected.json", split="train"):
+    """
+    Returns the combined dataset (CUAD subset + custom annotations) ready for fine-tuning.
+    """
+    cuad_docs = load_and_filter_cuad_dataset(split)
+    custom_docs = load_custom_annotations(custom_annotations_path)
+    return cuad_docs + custom_docs
+
 if __name__ == "__main__":
     docs = load_and_filter_cuad_dataset("train")
     print(f"Loaded {len(docs)} documents matching our criteria.")
