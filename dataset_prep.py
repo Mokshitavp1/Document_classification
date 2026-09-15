@@ -1,4 +1,11 @@
+import os
 import collections
+# WARNING: The CUAD dataset contains very long file paths.
+# If you run this on Windows, you MUST enable Long Paths in the Windows Registry 
+# (Computer\HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled = 1)
+# or the Hugging Face dataset download will fail with a FileNotFoundError.
+os.environ["HF_DATASETS_CACHE"] = "C:/hf_cuad"
+os.environ["HF_HOME"] = "C:/hf_cuad"
 from datasets import load_dataset
 
 def map_cuad_question_to_clause_type(question: str) -> str:
@@ -45,10 +52,7 @@ def load_and_filter_cuad_dataset(split="train"):
         ]
     }
     """
-    import os
-    # Use a short cache dir on Windows to avoid MAX_PATH length errors for CUAD's deep folders
-    short_cache_dir = os.path.join(os.path.expanduser("~"), "hf_cuad")
-    dataset = load_dataset("TheAtticusProject/cuad", split=split, cache_dir=short_cache_dir)
+    dataset = load_dataset("TheAtticusProject/cuad", split=split)
     
     # Group by document (title)
     docs_by_title = collections.defaultdict(lambda: {"context": "", "clauses": []})
