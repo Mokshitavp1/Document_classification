@@ -1,0 +1,41 @@
+[
+  {
+    "document_name": "dummy_employment_001",
+    "document_type": "employment",
+    "text": "This Employment Agreement is entered into today. The employee shall not compete with the company for 1 year after termination.",
+    "clauses": [
+      {
+        "clause_text": "The employee shall not compete with the company for 1 year after termination.",
+        "clause_type": "non_compete",
+        "span_start": 49,
+        "span_end": 126
+      }
+    ]
+  },
+  {
+    "document_name": "dummy_rental_001",
+    "document_type": "rental",
+    "text": "This Rental Agreement is for 12 months. The tenant will pay $1000 per month.",
+    "clauses": [
+      {
+        "clause_text": "The tenant will pay $1000 per month.",
+        "clause_type": "payment_terms",
+        "span_start": 40,
+        "span_end": 76
+      }
+    ]
+  },
+  {
+    "document_name": "dummy_privacy_001",
+    "document_type": "privacy",
+    "text": "Privacy Policy. We process your data according to EU law.",
+    "clauses": [
+      {
+        "clause_text": "We process your data according to EU law.",
+        "clause_type": "data_processing",
+        "span_start": 16,
+        "span_end": 57
+      }
+    ]
+  }
+]
