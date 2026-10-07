@@ -1,5 +1,6 @@
 import json
 import random
+from pathlib import Path
 from dataset_prep import get_full_dataset
 
 def main():
@@ -32,8 +33,16 @@ def main():
         "test": doc_names[val_end:]
     }
     
-    with open("splits.json", "w", encoding="utf-8") as f:
-        json.dump(splits, f, indent=2)
+    output = Path("splits.json")
+    if output.exists():
+        existing = json.loads(output.read_text(encoding="utf-8"))
+        if existing != splits:
+            raise RuntimeError(
+                "splits.json already exists and differs. Delete it explicitly only "
+                "if you intend to establish a new reproducibility contract."
+            )
+    else:
+        output.write_text(json.dumps(splits, indent=2) + "\n", encoding="utf-8")
         
     print(f"Generated splits.json successfully!")
     print(f"Train: {len(splits['train'])}, Val: {len(splits['val'])}, Test: {len(splits['test'])}")

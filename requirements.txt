@@ -4,3 +4,5 @@ datasets>=2.19.0
 scikit-learn>=1.4.0
 seqeval>=1.2.2
 accelerate>=0.30.0
+sentence-transformers>=3.0.0
+openai>=1.0.0
