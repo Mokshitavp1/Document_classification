@@ -1,7 +1,9 @@
 """Post-process model clauses with explainable outlier and omission checks."""
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+import json
 from math import sqrt
+from pathlib import Path
 from typing import Any
 
 from contract_constants import CLAUSE_TYPES, DOCUMENT_TYPES
@@ -50,17 +52,67 @@ def _percentile(values: Sequence[float], percentile: float) -> float:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
+def build_clause_reference_stats(
+    training_clauses_by_type: Mapping[str, Iterable[Mapping[str, Any]]],
+    embedder: EmbeddingFn,
+    percentile: float = 0.10,
+) -> dict[str, dict[str, Any]]:
+    """Build train-corpus centroids and leave-one-out similarity thresholds."""
+    if not 0 <= percentile <= 1:
+        raise ValueError("percentile must be between 0 and 1")
+    stats: dict[str, dict[str, Any]] = {}
+    for clause_type, clauses in training_clauses_by_type.items():
+        vectors = [list(embedder(clause["clause_text"])) for clause in clauses]
+        if not vectors:
+            continue
+        dimensions = len(vectors[0])
+        if dimensions == 0 or any(len(vector) != dimensions for vector in vectors):
+            raise ValueError("All embeddings must be non-empty and have equal dimensions")
+        centroid = [
+            sum(vector[dimension] for vector in vectors) / len(vectors)
+            for dimension in range(dimensions)
+        ]
+        similarities = []
+        for index, vector in enumerate(vectors):
+            if len(vectors) > 1:
+                peers = [other for peer_index, other in enumerate(vectors) if peer_index != index]
+                reference = [
+                    sum(peer[dimension] for peer in peers) / len(peers)
+                    for dimension in range(dimensions)
+                ]
+            else:
+                reference = centroid
+            similarities.append(_cosine_similarity(vector, reference))
+        stats[clause_type] = {
+            "centroid": centroid,
+            "threshold": _percentile(similarities, percentile),
+            "count": len(vectors),
+        }
+    return stats
+
+
+def save_reference_stats(path: str | Path, stats: Mapping[str, Mapping[str, Any]]) -> None:
+    Path(path).write_text(json.dumps(stats, indent=2), encoding="utf-8")
+
+
+def load_reference_stats(path: str | Path) -> dict[str, dict[str, Any]]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Reference stats must be a JSON object")
+    return data
+
+
 def flag_unusual_clauses(
     clauses: Iterable[Mapping[str, Any]],
     *,
     embedder: EmbeddingFn | None = None,
     percentile: float = 0.10,
+    reference_stats: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Add the 4.4 unusual-clause fields to model clause dictionaries.
 
-    Similarity is measured against the centroid of all *other* clauses with
-    the same type. A type with fewer than two examples has no comparison set
-    and is not flagged.
+    Reference stats use the training corpus. Without them, the within-document
+    comparison is retained as a backward-compatible fallback.
     """
     if not 0 <= percentile <= 1:
         raise ValueError("percentile must be between 0 and 1")
@@ -78,22 +130,28 @@ def flag_unusual_clauses(
         by_type.setdefault(clause["clause_type"], []).append(index)
 
     for index, clause in enumerate(result):
-        peers = [peer for peer in by_type[clause["clause_type"]] if peer != index]
         flagged = False
-        if peers:
-            dimensions = len(vectors[index])
-            if dimensions == 0 or any(len(vectors[peer]) != dimensions for peer in peers):
-                raise ValueError("All embeddings must be non-empty and have equal dimensions")
-            centroid = [
-                sum(vectors[peer][dimension] for peer in peers) / len(peers)
-                for dimension in range(dimensions)
-            ]
-            similarity = _cosine_similarity(vectors[index], centroid)
-            peer_similarities = [
-                _cosine_similarity(vectors[peer], centroid) for peer in peers
-            ]
-            threshold = _percentile([similarity, *peer_similarities], percentile)
-            flagged = similarity < threshold
+        if reference_stats is not None:
+            reference = reference_stats.get(clause["clause_type"])
+            if reference and int(reference.get("count", 0)) >= 5:
+                similarity = _cosine_similarity(vectors[index], reference["centroid"])
+                flagged = similarity < float(reference["threshold"])
+        else:
+            peers = [peer for peer in by_type[clause["clause_type"]] if peer != index]
+            if peers:
+                dimensions = len(vectors[index])
+                if dimensions == 0 or any(len(vectors[peer]) != dimensions for peer in peers):
+                    raise ValueError("All embeddings must be non-empty and have equal dimensions")
+                centroid = [
+                    sum(vectors[peer][dimension] for peer in peers) / len(peers)
+                    for dimension in range(dimensions)
+                ]
+                similarity = _cosine_similarity(vectors[index], centroid)
+                peer_similarities = [
+                    _cosine_similarity(vectors[peer], centroid) for peer in peers
+                ]
+                threshold = _percentile([similarity, *peer_similarities], percentile)
+                flagged = similarity < threshold
         clause["flagged_unusual"] = flagged
         clause["flag_reason"] = (
             f"atypical wording for a {clause['clause_type']} clause" if flagged else None
@@ -142,3 +200,39 @@ def build_expected_clauses(
             if count / len(group) >= minimum_presence
         }
     return result
+
+
+def build_reference_artifacts(
+    documents: Iterable[Mapping[str, Any]],
+    splits: Mapping[str, Iterable[str]],
+    embedder: EmbeddingFn,
+    out_dir: str | Path,
+) -> None:
+    """Write reference stats and expected clauses using only train documents."""
+    by_name = {document["document_name"]: document for document in documents}
+    train_documents = [by_name[name] for name in splits["train"]]
+    clauses_by_type: dict[str, list[Mapping[str, Any]]] = {}
+    for document in train_documents:
+        for clause in document.get("clauses", []):
+            clauses_by_type.setdefault(clause["clause_type"], []).append(clause)
+    output = Path(out_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    save_reference_stats(output / "reference_stats.json", build_clause_reference_stats(clauses_by_type, embedder))
+    expected = {
+        document_type: sorted(clause_types)
+        for document_type, clause_types in build_expected_clauses(train_documents).items()
+    }
+    (output / "expected_clauses.json").write_text(json.dumps(expected, indent=2), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("documents_json", type=Path)
+    parser.add_argument("splits_json", type=Path)
+    parser.add_argument("out_dir", type=Path)
+    args = parser.parse_args()
+    documents = json.loads(args.documents_json.read_text(encoding="utf-8"))
+    splits = json.loads(args.splits_json.read_text(encoding="utf-8"))
+    build_reference_artifacts(documents, splits, _default_embedder(), args.out_dir)

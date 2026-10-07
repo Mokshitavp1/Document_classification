@@ -1,6 +1,7 @@
 import collections
 import json
 import os
+import re
 from typing import Any
 # WARNING: The CUAD dataset contains very long file paths.
 # If you run this on Windows, you MUST enable Long Paths in the Windows Registry 
@@ -17,7 +18,7 @@ def map_cuad_question_to_clause_type(question: str) -> str | None:
     if "governing law" in q: return "governing_law"
     if "indemnification" in q: return "indemnification"
     if "limitation of liability" in q: return "liability_limitation"
-    if "anti-assignment" in q or "assignment" in q: return "assignment"
+    if "anti-assignment" in q: return "assignment"
     if "non-compete" in q: return "non_compete"
     if "no-solicit" in q: return "non_solicitation"
     if "ip ownership" in q: return "ip_ownership"
@@ -30,11 +31,11 @@ def map_cuad_question_to_clause_type(question: str) -> str | None:
 def determine_document_type(title: str) -> str | None:
     """Uses keyword heuristics to guess document type."""
     t = title.lower()
-    if "nda" in t or "non-disclosure" in t or "confidentiality" in t:
+    if re.search(r"\bnda\b", t) or "non-disclosure" in t or "confidentiality" in t:
         return "nda"
-    if "service" in t or "msa" in t or "statement of work" in t:
+    if re.search(r"\bservice\b", t) or re.search(r"\bmsa\b", t) or "statement of work" in t:
         return "service"
-    if "ip " in t or "intellectual property" in t or "license" in t or "licensing" in t:
+    if re.search(r"\bip\b", t) or "intellectual property" in t or "license" in t or "licensing" in t:
         return "ip"
     return None
 
@@ -147,13 +148,41 @@ def get_full_dataset(custom_annotations_path="bootstrap_labels_corrected.json", 
     validate_documents(documents)
     return documents
 
+
+def print_dataset_diagnostics(documents: list[dict[str, Any]]) -> None:
+    """Print document and clause coverage, including unused clause labels."""
+    document_counts = collections.Counter(
+        document["document_type"] for document in documents
+    )
+    clause_counts = collections.Counter(
+        clause["clause_type"]
+        for document in documents
+        for clause in document.get("clauses", [])
+    )
+    print("Document types:", dict(document_counts))
+    print("Clause types:", dict(clause_counts))
+    print(
+        "Clause types with zero examples:",
+        [clause_type for clause_type in CLAUSE_TYPES if not clause_counts[clause_type]],
+    )
+
+
+def print_cuad_question_examples(split: str = "train", limit: int = 10) -> None:
+    """Print distinct raw CUAD questions grouped by their mapped clause type."""
+    dataset = load_dataset("TheAtticusProject/cuad", split=split)
+    questions: dict[str, set[str]] = collections.defaultdict(set)
+    for row in dataset:
+        clause_type = map_cuad_question_to_clause_type(row["question"])
+        if clause_type:
+            questions[clause_type].add(row["question"])
+    for clause_type in CLAUSE_TYPES:
+        print(f"CUAD questions for {clause_type}:")
+        for question in sorted(questions.get(clause_type, set()))[:limit]:
+            print(f"  - {question}")
+
 if __name__ == "__main__":
     docs = load_and_filter_cuad_dataset("train")
     print(f"Loaded {len(docs)} documents matching our criteria.")
     
-    # Print some stats
-    doc_types = collections.Counter(d["document_type"] for d in docs)
-    print("Document types:", dict(doc_types))
-    
-    clause_types = collections.Counter(c["clause_type"] for d in docs for c in d["clauses"])
-    print("Clause types:", dict(clause_types))
+    print_dataset_diagnostics(docs)
+    print_cuad_question_examples("train")

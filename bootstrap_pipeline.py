@@ -76,6 +76,7 @@ Contract Text:
         return []
 
 def main():
+    random.seed(42)
     client = get_llm_client()
     
     print("Sourcing documents from Hugging Face...")
@@ -133,14 +134,10 @@ def main():
     except Exception as e:
         print(f"Failed to load legal_contracts dataset: {e}")
 
-    # Fallback if datasets are completely empty/failed
     if not documents:
-        print("Warning: Could not source documents from HF. Creating dummy ones for the pipeline test.")
-        documents.append({
-            "document_name": "dummy_employment_001",
-            "document_type": "employment",
-            "text": "This Employment Agreement is entered into today. The employee shall not compete with the company for 1 year after termination."
-        })
+        raise RuntimeError(
+            "No source documents were loaded; refusing to create synthetic bootstrap data."
+        )
 
     print(f"Total documents to process: {len(documents)}")
     
@@ -148,6 +145,7 @@ def main():
     final_output = []
     for doc in documents:
         print(f"Processing {doc['document_name']}...")
+        # The bootstrap LLM sees only the first 4000 characters of each document.
         clauses = extract_clauses_with_llm(client, doc["text"], doc["document_type"])
         final_output.append({
             "document_name": doc["document_name"],

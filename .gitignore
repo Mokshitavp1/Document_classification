@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 *.bin
 *.safetensors
+.hf_cache/
+.pytest_cache/
+evaluation_results.json
