@@ -36,9 +36,14 @@
 - Zero examples: confidentiality, indemnification, payment_terms, data_processing, dispute_resolution, force_majeure
 - Fewer than 20 examples: None
 
-## Changes
+## Title-based document-type facts
 
-- Replaced the obsolete script-based CUAD loader with the official JSON export loaded through the built-in JSON dataset builder, preserving all contracts.
-- Flattened CUAD's nested paragraphs and QA answers into the shared document shape and skipped only answers whose supplied offsets do not match their context.
-- Matched the real 41 CUAD question categories, including liability caps, uncapped liability, warranty duration, non-solicitation, renewal, assignment, IP ownership, governing law, and termination for convenience.
-- Expanded document-type detection with word-boundary-only keyword patterns.
+The title heuristic found 1 NDA, 0 employment, and 0 rental contracts. 166 contracts were labeled only by generic agreement/contract keywords. 30 contracts were excluded because their titles matched nothing.
+
+## Changes and remaining problems
+
+- Loaded only CUAD contracts whose titles matched a document-type keyword and skipped contracts whose titles matched nothing.
+- Used word-boundary regexes with specific title signals before generic agreement and contract signals.
+- Kept only CUAD categories that directly represent our clause types; confidentiality, indemnification, payment_terms, data_processing, dispute_resolution, and force_majeure remain unmapped because CUAD has no matching category.
+- CUAD has very few title-identifiable NDA, employment, and rental contracts; generic agreement/contract matches are reported separately and are not treated as stronger evidence.
+- Remaining problem: title heuristics exclude contracts with no matching title keyword, so the filtered dataset is not all CUAD contracts.

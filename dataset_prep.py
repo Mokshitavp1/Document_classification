@@ -41,64 +41,103 @@ def map_cuad_question_to_clause_type(question: str) -> str | None:
 
 def determine_document_type(title: str) -> str | None:
     """Uses keyword heuristics to guess document type."""
-    t = title.casefold()
+    match = _document_type_match(title)
+    return match[0] if match else None
 
-    def contains_any(words: tuple[str, ...]) -> bool:
-        pattern = r"\b(?:" + "|".join(re.escape(word) for word in words) + r")\b"
-        return re.search(pattern, t) is not None
 
-    if contains_any(("nda", "non-disclosure", "confidentiality")):
-        return "nda"
-    if contains_any(("privacy", "data protection", "data privacy")):
-        return "privacy"
-    if contains_any(("employment", "employee", "executive", "offer letter")):
-        return "employment"
-    if contains_any(("lease", "rental", "rent", "sublease", "real estate")):
-        return "rental"
-    if contains_any(
+_DOCUMENT_TYPE_PATTERNS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        "nda",
+        "specific",
+        (r"nda", r"non[- ]disclosure", r"confidentiality"),
+    ),
+    (
+        "privacy",
+        "specific",
+        (r"privacy", r"data protection", r"data privacy"),
+    ),
+    (
+        "employment",
+        "specific",
+        (r"employment", r"employee", r"executive", r"offer letter"),
+    ),
+    (
+        "rental",
+        "specific",
+        (r"lease", r"rental", r"rent", r"sublease", r"real estate"),
+    ),
+    (
+        "ip",
+        "specific",
         (
-            "ip",
-            "intellectual property",
-            "license",
-            "licensing",
-            "patent",
-            "trademark",
-            "copyright",
-            "technology",
-        )
-    ):
-        return "ip"
-    if contains_any(
+            r"intellectual property",
+            r"\bip\b",
+            r"license",
+            r"licensing",
+            r"patent",
+            r"trademark",
+            r"copyright",
+            r"technology",
+        ),
+    ),
+    (
+        "service",
+        "specific",
         (
-            "service",
-            "msa",
-            "statement of work",
-            "agreement",
-            "affiliate",
-            "agency",
-            "collaboration",
-            "co-branding",
-            "consulting",
-            "development",
-            "distributor",
-            "endorsement",
-            "franchise",
-            "hosting",
-            "joint venture",
-            "maintenance",
-            "manufacturing",
-            "marketing",
-            "outsourcing",
-            "promotion",
-            "reseller",
-            "sponsorship",
-            "strategic alliance",
-            "supply",
-            "transportation",
-        )
-    ):
-        return "service"
+            r"service",
+            r"msa",
+            r"statement of work",
+            r"affiliate",
+            r"agency",
+            r"collaboration",
+            r"co-branding",
+            r"consulting",
+            r"development",
+            r"distributor",
+            r"endorsement",
+            r"franchise",
+            r"hosting",
+            r"joint venture",
+            r"maintenance",
+            r"manufacturing",
+            r"marketing",
+            r"outsourcing",
+            r"promotion",
+            r"reseller",
+            r"sponsorship",
+            r"strategic alliance",
+            r"supply",
+            r"transportation",
+        ),
+    ),
+    ("service", "generic", (r"agreement", r"contract")),
+)
+
+
+def _document_type_match(title: str) -> tuple[str, str] | None:
+    """Return the type and whether its match is specific or generic."""
+    normalized_title = title.casefold()
+    for document_type, match_kind, patterns in _DOCUMENT_TYPE_PATTERNS:
+        pattern = r"(?<!\w)(?:" + "|".join(patterns) + r")(?!\w)"
+        if re.search(pattern, normalized_title):
+            return document_type, match_kind
     return None
+
+
+def _cuad_title_classification_counts(
+    articles: list[dict[str, Any]],
+) -> collections.Counter[str]:
+    """Count CUAD titles by specific, generic-only, or unmatched classification."""
+    counts: collections.Counter[str] = collections.Counter()
+    for article in articles:
+        match = _document_type_match(article["title"].strip())
+        if match is None:
+            counts["unmatched"] += 1
+        elif match[1] == "generic":
+            counts["generic_only"] += 1
+        else:
+            counts[match[0]] += 1
+    return counts
 
 
 def _load_cuad_articles() -> list[dict[str, Any]]:
@@ -135,43 +174,50 @@ def load_and_filter_cuad_dataset(split: str = "train") -> list[dict[str, Any]]:
     del split  # The official JSON export contains the train/test contracts together.
     dataset = _load_cuad_articles()
 
-    docs_by_title = collections.defaultdict(lambda: {"context": "", "clauses": []})
-    for article in dataset:
-        title = article["title"].strip()
-        paragraph = article["paragraphs"][0]
-        context = paragraph["context"]
-        docs_by_title[title]["context"] = context
-        for qa in paragraph["qas"]:
-            clause_type = map_cuad_question_to_clause_type(qa["question"])
-            if not clause_type:
-                continue
-            for answer in qa["answers"]:
-                text = answer["text"]
-                start = answer["answer_start"]
-                end = start + len(text)
-                if not 0 <= start <= end <= len(context) or context[start:end] != text:
-                    continue
-                docs_by_title[title]["clauses"].append(
-                    {
-                        "clause_text": text,
-                        "clause_type": clause_type,
-                        "span_start": start,
-                        "span_end": end,
-                    }
-                )
-
     final_documents = []
-    for title, doc_info in docs_by_title.items():
+    used_names: set[str] = set()
+    for article_index, article in enumerate(dataset, start=1):
+        title = article["title"].strip()
         doc_type = determine_document_type(title)
-        if not doc_type:
+        if doc_type is None:
             continue
-        final_documents.append({
-            "document_name": title,
-            "document_type": doc_type,
-            "text": doc_info["context"],
-            "clauses": doc_info["clauses"]
-        })
-        
+        document_name = title
+        if document_name in used_names:
+            document_name = f"{title} [{article_index}]"
+        used_names.add(document_name)
+        paragraphs = article["paragraphs"]
+        context = paragraphs[0]["context"]
+        clauses = []
+        for paragraph in paragraphs:
+            if paragraph["context"] != context:
+                raise ValueError(f"CUAD article has inconsistent contexts: {title!r}")
+            for qa in paragraph["qas"]:
+                clause_type = map_cuad_question_to_clause_type(qa["question"])
+                if not clause_type:
+                    continue
+                for answer in qa["answers"]:
+                    text = answer["text"]
+                    start = answer["answer_start"]
+                    end = start + len(text)
+                    if not 0 <= start <= end <= len(context) or context[start:end] != text:
+                        continue
+                    clauses.append(
+                        {
+                            "clause_text": text,
+                            "clause_type": clause_type,
+                            "span_start": start,
+                            "span_end": end,
+                        }
+                    )
+        final_documents.append(
+            {
+                "document_name": document_name,
+                "document_type": doc_type,
+                "text": context,
+                "clauses": clauses,
+            }
+        )
+
     return final_documents
 
 
@@ -306,13 +352,26 @@ def print_cuad_data_quality() -> None:
         f"{len(articles) - len(unmatched_titles)}/{len(articles)}, "
         f"unmatched {len(unmatched_titles)}"
     )
-    print("30 random titles classified as None:")
+    print(f"Random titles classified as None ({len(unmatched_titles)} total, up to 30):")
     for title in rng.sample(unmatched_titles, min(30, len(unmatched_titles))):
         print(f"  - {title}")
+    title_counts = _cuad_title_classification_counts(articles)
+    print(
+        "Titles matched only by generic agreement/contract keywords:",
+        title_counts["generic_only"],
+    )
+    print(
+        "True title matches for NDA, employment, rental:",
+        {
+            doc_type: title_counts[doc_type]
+            for doc_type in ("nda", "employment", "rental")
+        },
+    )
+    print("Contracts excluded because title matched nothing:", title_counts["unmatched"])
     for doc_type in DOCUMENT_TYPES:
         titles = titles_by_type.get(doc_type, [])
-        print(f"10 random titles classified as {doc_type} ({len(titles)} total):")
-        for title in rng.sample(titles, min(10, len(titles))):
+        print(f"20 random titles classified as {doc_type} ({len(titles)} total):")
+        for title in rng.sample(titles, min(20, len(titles))):
             print(f"  - {title}")
 
 
@@ -339,16 +398,31 @@ def write_dataset_report(documents: list[dict[str, Any]], path: str = "DATASET_R
         report.write("\n## Missing and low-coverage clause types\n\n")
         report.write(f"- Zero examples: {', '.join(zero) or 'None'}\n")
         report.write(f"- Fewer than 20 examples: {', '.join(low) or 'None'}\n")
-        report.write("\n## Changes\n\n")
+        cuad_title_counts = _cuad_title_classification_counts(_load_cuad_articles())
+        report.write("\n## Title-based document-type facts\n\n")
         report.write(
-            "- Replaced the obsolete script-based CUAD loader with the official JSON export "
-            "loaded through the built-in JSON dataset builder, preserving all contracts.\n"
-            "- Flattened CUAD's nested paragraphs and QA answers into the shared document shape "
-            "and skipped only answers whose supplied offsets do not match their context.\n"
-            "- Matched the real 41 CUAD question categories, including liability caps, uncapped "
-            "liability, warranty duration, non-solicitation, renewal, assignment, IP ownership, "
-            "governing law, and termination for convenience.\n"
-            "- Expanded document-type detection with word-boundary-only keyword patterns.\n"
+            "The title heuristic found "
+            f"{cuad_title_counts['nda']} NDA, {cuad_title_counts['employment']} employment, "
+            f"and {cuad_title_counts['rental']} rental contracts. "
+            f"{cuad_title_counts['generic_only']} contracts were labeled only by generic "
+            "agreement/contract keywords. "
+            f"{cuad_title_counts['unmatched']} contracts were excluded because their "
+            "titles matched nothing.\n"
+        )
+        report.write("\n## Changes and remaining problems\n\n")
+        report.write(
+            "- Loaded only CUAD contracts whose titles matched a document-type keyword and "
+            "skipped contracts whose titles matched nothing.\n"
+            "- Used word-boundary regexes with specific title signals before generic agreement "
+            "and contract signals.\n"
+            "- Kept only CUAD categories that directly represent our clause types; confidentiality, "
+            "indemnification, payment_terms, data_processing, dispute_resolution, and "
+            "force_majeure remain unmapped because CUAD has no matching category.\n"
+            "- CUAD has very few title-identifiable NDA, employment, and rental contracts; "
+            "generic agreement/contract matches are reported separately and are not treated "
+            "as stronger evidence.\n"
+            "- Remaining problem: title heuristics exclude contracts with no matching title "
+            "keyword, so the filtered dataset is not all CUAD contracts.\n"
         )
 
 
@@ -359,4 +433,5 @@ if __name__ == "__main__":
     print_cuad_question_examples()
     print_cuad_data_quality()
     validate_documents(docs)
+    print("validate_documents passed.")
     write_dataset_report(docs)
