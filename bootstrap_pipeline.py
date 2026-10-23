@@ -56,56 +56,118 @@ def check_ollama_ready(client: OpenAI) -> None:
         exit(1)
     print(f"[OK] Ollama ready - using model '{MODEL_NAME}' at {OLLAMA_HOST}")
 
-def extract_clauses_with_llm(client: OpenAI, text: str, document_type: str) -> list[dict]:
-    """Ask the local Qwen2.5-7B model to extract clause spans from a document."""
-    truncated_text = text[:_CONTEXT_CHARS]
-    prompt = f"""You are an expert legal AI.
-Given the following {document_type} contract, extract any clauses that match the following types:
-{', '.join(CLAUSE_TYPES)}
+def _parse_llm_json(content: str) -> list[dict] | None:
+    """Extract a JSON list from the model response using three fallback strategies.
 
-Return the extracted clauses as a JSON list of objects, where each object has:
-- "clause_type": string (must be exactly one of the types above)
-- "clause_text": string (the exact verbatim text of the clause from the document)
+    Returns the parsed list on success, or None if all strategies fail.
+    """
+    import re as _re
 
-If there are no matching clauses, return an empty list [].
-Do NOT include any markdown formatting, return ONLY valid JSON.
-
-Contract Text:
-{truncated_text}"""
+    # Strategy 1: strip markdown fences, then parse directly.
+    text = content.strip()
+    for fence in ("```json", "```"):
+        if text.startswith(fence):
+            text = text[len(fence):]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+            break
     try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
+        result = json.loads(text)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: pull the first [...] block out even if there's surrounding prose.
+    match = _re.search(r"\[.*?\]", text, _re.DOTALL)
+    if match:
+        try:
+            result = json.loads(match.group())
+            if isinstance(result, list):
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 3: truncate at the last complete object to repair trailing garbage.
+    last_brace = text.rfind("}")
+    if last_brace != -1:
+        candidate = text[: last_brace + 1]
+        # Wrap as array if not already one.
+        if not candidate.lstrip().startswith("["):
+            candidate = "[" + candidate + "]"
+        else:
+            candidate = candidate + "]"
+        try:
+            result = json.loads(candidate)
+            if isinstance(result, list):
+                return result
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+def extract_clauses_with_llm(client: OpenAI, text: str, document_type: str) -> list[dict]:
+    """Ask the local Qwen2.5-7B model to extract clause spans from a document.
+
+    Retries up to 3 times on JSON parse failure before returning an empty list.
+    """
+    truncated_text = text[:_CONTEXT_CHARS]
+    base_prompt = (
+        f"You are an expert legal AI.\n"
+        f"Given the following {document_type} contract, extract any clauses that "
+        f"match the following types:\n{', '.join(CLAUSE_TYPES)}\n\n"
+        f"Return the extracted clauses as a JSON list of objects, where each object has:\n"
+        f'- "clause_type": string (must be exactly one of the types above)\n'
+        f'- "clause_text": string (the exact verbatim text of the clause from the document)\n\n'
+        f"If there are no matching clauses, return an empty list [].\n"
+        f"Do NOT include any markdown formatting, return ONLY valid JSON.\n\n"
+        f"Contract Text:\n{truncated_text}"
+    )
+
+    _MAX_ATTEMPTS = 3
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        # On retries, prepend an explicit reminder to fix the format.
+        retry_prefix = (
+            f"Your previous response was not valid JSON. "
+            f"Return ONLY a JSON array, nothing else. Attempt {attempt}/{_MAX_ATTEMPTS}.\n\n"
+            if attempt > 1 else ""
         )
-        content = response.choices[0].message.content.strip()
-        # Clean up possible markdown fences
-        if content.startswith("```json"):
-            content = content[7:-3]
-        elif content.startswith("```"):
-            content = content[3:-3]
-            
-        clauses = json.loads(content)
-        
-        # Now find the exact spans
-        valid_clauses = []
-        for c in clauses:
-            c_text = c.get("clause_text", "")
-            c_type = c.get("clause_type", "")
-            
-            # Simple string matching to find the offset
-            start_idx = text.find(c_text)
-            if start_idx != -1 and c_type in CLAUSE_TYPES:
-                valid_clauses.append({
-                    "clause_text": c_text,
-                    "clause_type": c_type,
-                    "span_start": start_idx,
-                    "span_end": start_idx + len(c_text)
-                })
-        return valid_clauses
-    except Exception as e:
-        print(f"Error during LLM extraction: {e}")
-        return []
+        prompt = retry_prefix + base_prompt
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            raw = response.choices[0].message.content
+            parsed = _parse_llm_json(raw)
+            if parsed is None:
+                raise json.JSONDecodeError(
+                    f"Could not extract a JSON list from response", raw, 0
+                )
+            # Resolve character spans in the original (un-truncated) text.
+            valid_clauses = []
+            for c in parsed:
+                c_text = c.get("clause_text", "")
+                c_type = c.get("clause_type", "")
+                start_idx = text.find(c_text)
+                if start_idx != -1 and c_type in CLAUSE_TYPES:
+                    valid_clauses.append({
+                        "clause_text": c_text,
+                        "clause_type": c_type,
+                        "span_start": start_idx,
+                        "span_end": start_idx + len(c_text),
+                    })
+            return valid_clauses
+        except Exception as exc:
+            if attempt < _MAX_ATTEMPTS:
+                print(f"  Parse error (attempt {attempt}/{_MAX_ATTEMPTS}), retrying: {exc}")
+            else:
+                print(f"  Failed after {_MAX_ATTEMPTS} attempts: {exc}")
+    return []
+
 
 def main() -> None:
     random.seed(42)
