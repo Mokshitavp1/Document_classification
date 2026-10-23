@@ -1,6 +1,11 @@
 import os
 import json
 import random
+
+# Suppress the HuggingFace symlink warning on Windows — degraded caching is
+# acceptable here; we're only downloading small bootstrap datasets.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
 from datasets import load_dataset
 
 try:
@@ -127,40 +132,62 @@ def main() -> None:
         print(f"Failed to load privacy dataset: {e}")
         
     try:
-        # Example dataset for various legal contracts (contains employment and rental)
-        print("Downloading general contracts...")
-        contracts_ds = load_dataset("albertvillanova/legal_contracts", split="train")
-        
-        # Filter for employment and rental heuristically
-        employment_docs = []
-        rental_docs = []
-        
+        # albertvillanova/legal_contracts uses a custom loading script;
+        # trust_remote_code=True is required by datasets>=2.16.
+        print("Downloading general contracts (employment + rental)...")
+        contracts_ds = load_dataset(
+            "albertvillanova/legal_contracts",
+            split="train",
+            trust_remote_code=True,
+        )
+
+        employment_docs: list = []
+        rental_docs: list = []
+
         for row in contracts_ds:
-            text = row.get("text", "").lower()
-            if "employment" in text or "employee" in text:
+            # Check both the raw text and any title/source field for keywords
+            # so we don't miss contracts whose body starts with boilerplate.
+            raw = row.get("text", "")
+            probe = (row.get("title", "") + " " + raw[:500]).lower()
+
+            if len(employment_docs) < 30 and (
+                "employment" in probe or "employee" in probe or "employer" in probe
+            ):
                 employment_docs.append(row)
-            elif "rental" in text or "lease" in text or "tenant" in text:
+            elif len(rental_docs) < 30 and (
+                "rental" in probe or "lease" in probe
+                or "tenant" in probe or "landlord" in probe
+            ):
                 rental_docs.append(row)
-                
+
             if len(employment_docs) >= 30 and len(rental_docs) >= 30:
                 break
-                
-        for i, sample in enumerate(employment_docs[:30]):
+
+        for i, sample in enumerate(employment_docs):
             documents.append({
                 "document_name": f"employment_contract_{i:03d}",
                 "document_type": "employment",
-                "text": sample.get("text", "")
+                "text": sample.get("text", ""),
             })
-            
-        for i, sample in enumerate(rental_docs[:30]):
+
+        for i, sample in enumerate(rental_docs):
             documents.append({
                 "document_name": f"rental_agreement_{i:03d}",
                 "document_type": "rental",
-                "text": sample.get("text", "")
+                "text": sample.get("text", ""),
             })
-            
+
+        print(
+            f"  Found {len(employment_docs)} employment and "
+            f"{len(rental_docs)} rental documents."
+        )
+
     except Exception as e:
         print(f"Failed to load legal_contracts dataset: {e}")
+        print(
+            "  Tip: if the error mentions 'trust_remote_code', ensure datasets>=2.16 "
+            "is installed and re-run. Employment and rental docs will be skipped."
+        )
 
     if not documents:
         raise RuntimeError(
