@@ -15,7 +15,7 @@ except ImportError:
     exit(1)
 
 from contract_constants import CLAUSE_TYPES
-from dataset_prep import validate_documents
+from dataset_prep import validate_documents, CUAD_JSON_URL
 
 # ---------------------------------------------------------------------------
 # Model configuration — local Ollama, no API key required.
@@ -132,62 +132,68 @@ def main() -> None:
         print(f"Failed to load privacy dataset: {e}")
         
     try:
-        # albertvillanova/legal_contracts uses a custom loading script;
-        # trust_remote_code=True is required by datasets>=2.16.
-        print("Downloading general contracts (employment + rental)...")
-        contracts_ds = load_dataset(
-            "albertvillanova/legal_contracts",
-            split="train",
-            trust_remote_code=True,
+        # albertvillanova/legal_contracts permanently broke in datasets 3.x
+        # (custom loading scripts removed). We now pull employment and rental
+        # examples directly from CUAD — the same dataset dataset_prep.py uses —
+        # filtering by text keywords rather than title only, so we catch more
+        # contracts than the strict title heuristic in dataset_prep.py.
+        print("Downloading employment and rental contracts from CUAD...")
+        cuad_raw = load_dataset(
+            "json",
+            data_files={"cuad": CUAD_JSON_URL},
+            field="data",
         )
 
-        employment_docs: list = []
-        rental_docs: list = []
+        employment_docs: list[dict] = []
+        rental_docs: list[dict] = []
 
-        for row in contracts_ds:
-            # Check both the raw text and any title/source field for keywords
-            # so we don't miss contracts whose body starts with boilerplate.
-            raw = row.get("text", "")
-            probe = (row.get("title", "") + " " + raw[:500]).lower()
+        splits = cuad_raw.values() if hasattr(cuad_raw, "values") else (cuad_raw,)
+        for split_ds in splits:
+            for article in split_ds:
+                title = article.get("title", "")
+                paragraphs = article.get("paragraphs") or []
+                context = paragraphs[0]["context"] if paragraphs else ""
+                # Probe the title + first 500 chars of body for keywords.
+                probe = (title + " " + context[:500]).lower()
 
-            if len(employment_docs) < 30 and (
-                "employment" in probe or "employee" in probe or "employer" in probe
-            ):
-                employment_docs.append(row)
-            elif len(rental_docs) < 30 and (
-                "rental" in probe or "lease" in probe
-                or "tenant" in probe or "landlord" in probe
-            ):
-                rental_docs.append(row)
+                if len(employment_docs) < 30 and (
+                    "employment" in probe
+                    or "employee" in probe
+                    or "employer" in probe
+                ):
+                    employment_docs.append({"text": context, "title": title})
+                elif len(rental_docs) < 30 and (
+                    "lease" in probe
+                    or "rental" in probe
+                    or "tenant" in probe
+                    or "landlord" in probe
+                ):
+                    rental_docs.append({"text": context, "title": title})
 
-            if len(employment_docs) >= 30 and len(rental_docs) >= 30:
-                break
+                if len(employment_docs) >= 30 and len(rental_docs) >= 30:
+                    break
 
         for i, sample in enumerate(employment_docs):
             documents.append({
                 "document_name": f"employment_contract_{i:03d}",
                 "document_type": "employment",
-                "text": sample.get("text", ""),
+                "text": sample["text"],
             })
 
         for i, sample in enumerate(rental_docs):
             documents.append({
                 "document_name": f"rental_agreement_{i:03d}",
                 "document_type": "rental",
-                "text": sample.get("text", ""),
+                "text": sample["text"],
             })
 
         print(
             f"  Found {len(employment_docs)} employment and "
-            f"{len(rental_docs)} rental documents."
+            f"{len(rental_docs)} rental documents from CUAD."
         )
 
     except Exception as e:
-        print(f"Failed to load legal_contracts dataset: {e}")
-        print(
-            "  Tip: if the error mentions 'trust_remote_code', ensure datasets>=2.16 "
-            "is installed and re-run. Employment and rental docs will be skipped."
-        )
+        print(f"Failed to load employment/rental from CUAD: {e}")
 
     if not documents:
         raise RuntimeError(
