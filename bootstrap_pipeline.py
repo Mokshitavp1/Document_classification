@@ -9,12 +9,8 @@ except ImportError:
     print("Please install openai: pip install openai")
     exit(1)
 
-CLAUSE_TYPES = [
-    "termination", "confidentiality", "indemnification", "governing_law",
-    "payment_terms", "liability_limitation", "assignment", "non_compete",
-    "non_solicitation", "ip_ownership", "data_processing", "renewal",
-    "dispute_resolution", "force_majeure", "warranty"
-]
+from contract_constants import CLAUSE_TYPES
+from dataset_prep import validate_documents
 
 def get_llm_client():
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -25,8 +21,9 @@ def get_llm_client():
     return OpenAI(api_key=api_key)
 
 def extract_clauses_with_llm(client, text, document_type):
-    prompt = f"""
-You are an expert legal AI.
+    # Truncate to first 4000 characters to stay within LLM token limits.
+    truncated_text = text[:4000]
+    prompt = f"""You are an expert legal AI.
 Given the following {document_type} contract, extract any clauses that match the following types:
 {', '.join(CLAUSE_TYPES)}
 
@@ -38,8 +35,7 @@ If there are no matching clauses, return an empty list [].
 Do NOT include any markdown formatting, return ONLY valid JSON.
 
 Contract Text:
-{text[:4000]}  # Truncated for token limits in this script
-"""
+{truncated_text}"""
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -154,10 +150,16 @@ def main():
             "clauses": clauses
         })
         
+    try:
+        validate_documents(final_output)
+    except ValueError as exc:
+        print(f"Warning: bootstrap output failed validation: {exc}")
+        print("Saving anyway for manual review, but fix the issues before using for training.")
+
     output_file = "bootstrap_labels_pending_review.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(final_output, f, indent=2, ensure_ascii=False)
-        
+
     print(f"Done! Saved to {output_file}.")
     print("Please manually review and correct this file, then save it as 'bootstrap_labels_corrected.json'.")
 

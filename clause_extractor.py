@@ -10,11 +10,20 @@ from contract_constants import CLAUSE_TYPES, DOCUMENT_TYPES
 
 EmbeddingFn = Callable[[str], Sequence[float]]
 
-# This is intentionally replaceable with the corpus-derived mapping from the
-# trained model module. It is kept small until that corpus is available.
+# Best-effort static mapping per CONTRACTS.md §4.4.
+# Replace with the output of build_expected_clauses() once training data is available:
+#   expected = build_expected_clauses(train_documents)
+#   save to checkpoints/<version>/expected_clauses.json and load via aggregate.py.
 EXPECTED_CLAUSES: dict[str, set[str]] = {
     "nda": {"confidentiality", "termination"},
-    "employment": {"termination", "confidentiality"},
+    "employment": {"termination", "confidentiality", "non_compete", "non_solicitation"},
+    "rental": {"termination", "payment_terms", "renewal"},
+    "privacy": {"confidentiality", "data_processing", "governing_law"},
+    "ip": {"ip_ownership", "confidentiality", "termination", "assignment", "governing_law"},
+    "service": {
+        "termination", "payment_terms", "liability_limitation",
+        "indemnification", "governing_law", "confidentiality",
+    },
 }
 
 

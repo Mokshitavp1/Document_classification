@@ -6,6 +6,13 @@ __pycache__/
 *.pyc
 *.bin
 *.safetensors
+*.pt
+*.pth
 .hf_cache/
 .pytest_cache/
 evaluation_results.json
+# Bootstrap output awaiting human review — not for committing
+bootstrap_labels_pending_review.json
+# Training-derived reference artifacts (re-generated from checkpoints)
+reference_stats.json
+expected_clauses.json
