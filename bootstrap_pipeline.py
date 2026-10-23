@@ -37,19 +37,19 @@ def check_ollama_ready(client: OpenAI) -> None:
         models = [m.id for m in client.models.list().data]
     except Exception as exc:
         print(
-            f"\n❌  Cannot reach Ollama at {OLLAMA_HOST}.\n"
-            "    Make sure Ollama is running: https://ollama.com\n"
-            f"    Error: {exc}"
+            f"\n[ERROR] Cannot reach Ollama at {OLLAMA_HOST}.\n"
+            "        Make sure Ollama is running: https://ollama.com\n"
+            f"        Error: {exc}"
         )
         exit(1)
     if MODEL_NAME not in models:
         print(
-            f"\n❌  Model '{MODEL_NAME}' is not pulled yet.\n"
-            f"    Run:  ollama pull {MODEL_NAME}\n"
-            f"    Available models: {models or '(none)'}"
+            f"\n[ERROR] Model '{MODEL_NAME}' is not pulled yet.\n"
+            f"        Run:  ollama pull {MODEL_NAME}\n"
+            f"        Available models: {models or '(none)'}"
         )
         exit(1)
-    print(f"✅  Ollama ready — using model '{MODEL_NAME}' at {OLLAMA_HOST}")
+    print(f"[OK] Ollama ready - using model '{MODEL_NAME}' at {OLLAMA_HOST}")
 
 def extract_clauses_with_llm(client: OpenAI, text: str, document_type: str) -> list[dict]:
     """Ask the local Qwen2.5-7B model to extract clause spans from a document."""
