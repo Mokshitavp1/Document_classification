@@ -5,4 +5,6 @@ scikit-learn>=1.4.0
 seqeval>=1.2.2
 accelerate>=0.30.0
 sentence-transformers>=3.0.0
+# Used as the HTTP client for Ollama's OpenAI-compatible endpoint (/v1).
+# No OpenAI API key or cloud access required.
 openai>=1.0.0

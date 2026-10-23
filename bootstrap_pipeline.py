@@ -12,17 +12,48 @@ except ImportError:
 from contract_constants import CLAUSE_TYPES
 from dataset_prep import validate_documents
 
-def get_llm_client():
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        print("Error: OPENAI_API_KEY environment variable is not set.")
-        print("Please set it to run the LLM pre-labeling.")
-        exit(1)
-    return OpenAI(api_key=api_key)
+# ---------------------------------------------------------------------------
+# Model configuration — local Ollama, no API key required.
+# Override OLLAMA_HOST if Ollama is not running on localhost.
+# ---------------------------------------------------------------------------
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+MODEL_NAME = "qwen2.5:7b-instruct"
+# Qwen2.5-7B has a 32 k context window; 6 000 chars is a safe truncation point
+# that keeps us well within limits even after the system prompt overhead.
+_CONTEXT_CHARS = 6_000
 
-def extract_clauses_with_llm(client, text, document_type):
-    # Truncate to first 4000 characters to stay within LLM token limits.
-    truncated_text = text[:4000]
+def get_llm_client() -> OpenAI:
+    """Return an OpenAI-compatible client pointed at the local Ollama server."""
+    return OpenAI(
+        base_url=f"{OLLAMA_HOST}/v1",
+        # Ollama's OpenAI-compatible endpoint accepts any non-empty string.
+        api_key="ollama",
+    )
+
+
+def check_ollama_ready(client: OpenAI) -> None:
+    """Verify Ollama is running and the required model is available."""
+    try:
+        models = [m.id for m in client.models.list().data]
+    except Exception as exc:
+        print(
+            f"\n❌  Cannot reach Ollama at {OLLAMA_HOST}.\n"
+            "    Make sure Ollama is running: https://ollama.com\n"
+            f"    Error: {exc}"
+        )
+        exit(1)
+    if MODEL_NAME not in models:
+        print(
+            f"\n❌  Model '{MODEL_NAME}' is not pulled yet.\n"
+            f"    Run:  ollama pull {MODEL_NAME}\n"
+            f"    Available models: {models or '(none)'}"
+        )
+        exit(1)
+    print(f"✅  Ollama ready — using model '{MODEL_NAME}' at {OLLAMA_HOST}")
+
+def extract_clauses_with_llm(client: OpenAI, text: str, document_type: str) -> list[dict]:
+    """Ask the local Qwen2.5-7B model to extract clause spans from a document."""
+    truncated_text = text[:_CONTEXT_CHARS]
     prompt = f"""You are an expert legal AI.
 Given the following {document_type} contract, extract any clauses that match the following types:
 {', '.join(CLAUSE_TYPES)}
@@ -38,9 +69,9 @@ Contract Text:
 {truncated_text}"""
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.0
+            temperature=0.0,
         )
         content = response.choices[0].message.content.strip()
         # Clean up possible markdown fences
@@ -71,9 +102,10 @@ Contract Text:
         print(f"Error during LLM extraction: {e}")
         return []
 
-def main():
+def main() -> None:
     random.seed(42)
     client = get_llm_client()
+    check_ollama_ready(client)
     
     print("Sourcing documents from Hugging Face...")
     
