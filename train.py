@@ -163,6 +163,7 @@ class WeightedTokenTrainer(Trainer):
         self.class_weights = class_weights
 
     def compute_loss(self, model: Any, inputs: dict[str, Any], return_outputs: bool = False, **kwargs: Any) -> Any:
+        del kwargs
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         loss = torch.nn.CrossEntropyLoss(

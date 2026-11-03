@@ -1,5 +1,6 @@
 from evaluate import span_metrics
 from windowing import assign_bio_labels, merge_predicted_spans
+from generate_splits import main as generate_splits
 
 
 def test_continuation_window_gets_i_label():
@@ -46,3 +47,20 @@ def test_span_metrics_exact_and_lenient():
     metrics = span_metrics(gold, predicted)
     assert metrics["exact"]["macro"]["f1"] == 0.0
     assert metrics["lenient_iou_0.5"]["macro"]["f1"] == 1.0
+
+
+def test_generate_splits_honors_output_path(tmp_path, monkeypatch):
+    class FakeDataset:
+        def __iter__(self):
+            return iter(
+                [
+                    {"document_name": "a", "document_type": "service"},
+                    {"document_name": "b", "document_type": "service"},
+                    {"document_name": "c", "document_type": "service"},
+                ]
+            )
+
+    monkeypatch.setattr("generate_splits.get_full_dataset", lambda: FakeDataset())
+    output = tmp_path / "custom-splits.json"
+    generate_splits(output)
+    assert output.exists()

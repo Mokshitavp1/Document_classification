@@ -47,7 +47,20 @@ def _default_embedder() -> EmbeddingFn:
         ) from exc
 
     model = SentenceTransformer("all-MiniLM-L6-v2")
-    return lambda text: model.encode(text, normalize_embeddings=False).tolist()
+
+    def embed(text: str) -> list[float]:
+        return model.encode(text, normalize_embeddings=False).tolist()
+
+    def batch_embed(texts: Sequence[str]) -> list[list[float]]:
+        return model.encode(
+            list(texts),
+            batch_size=32,
+            normalize_embeddings=False,
+            show_progress_bar=False,
+        ).tolist()
+
+    embed.batch_embed = batch_embed  # type: ignore[attr-defined]
+    return embed
 
 
 def _percentile(values: Sequence[float], percentile: float) -> float:
@@ -71,7 +84,16 @@ def build_clause_reference_stats(
         raise ValueError("percentile must be between 0 and 1")
     stats: dict[str, dict[str, Any]] = {}
     for clause_type, clauses in training_clauses_by_type.items():
-        vectors = [list(embedder(clause["clause_text"])) for clause in clauses]
+        clause_list = list(clauses)
+        batch_embed = getattr(embedder, "batch_embed", None)
+        if callable(batch_embed):
+            vectors = batch_embed(
+                [clause["clause_text"] for clause in clause_list]
+            )
+        else:
+            vectors = [
+                list(embedder(clause["clause_text"])) for clause in clause_list
+            ]
         if not vectors:
             continue
         dimensions = len(vectors[0])
@@ -241,7 +263,17 @@ if __name__ == "__main__":
     parser.add_argument("documents_json", type=Path)
     parser.add_argument("splits_json", type=Path)
     parser.add_argument("out_dir", type=Path)
+    parser.add_argument(
+        "--full-dataset",
+        action="store_true",
+        help="Load the complete configured dataset instead of documents_json.",
+    )
     args = parser.parse_args()
-    documents = json.loads(args.documents_json.read_text(encoding="utf-8"))
+    if args.full_dataset:
+        from dataset_prep import get_full_dataset
+
+        documents = get_full_dataset()
+    else:
+        documents = json.loads(args.documents_json.read_text(encoding="utf-8"))
     splits = json.loads(args.splits_json.read_text(encoding="utf-8"))
     build_reference_artifacts(documents, splits, _default_embedder(), args.out_dir)

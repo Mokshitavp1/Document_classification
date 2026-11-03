@@ -1,10 +1,11 @@
 import json
+import argparse
 from pathlib import Path
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
 from dataset_prep import get_full_dataset
 
-def main():
+def main(output: Path = Path("splits.json")) -> None:
     print("Loading full dataset to extract document names...")
     try:
         dataset = get_full_dataset()
@@ -26,8 +27,11 @@ def main():
     splits = {"train": [], "val": [], "test": []}
     for document_type, names in sorted(documents_by_type.items()):
         names = sorted(names)
-        if len(names) < 3:
-            print(f"Warning: {document_type} has fewer than 3 documents; assigning all to train.")
+        if len(names) < 4:
+            print(
+                f"Warning: {document_type} has fewer than 4 documents; "
+                "assigning all to train."
+            )
             splits["train"].extend(names)
             continue
         train_names, remainder = train_test_split(
@@ -42,7 +46,6 @@ def main():
     for values in splits.values():
         values.sort()
     
-    output = Path("splits.json")
     if output.exists():
         existing = json.loads(output.read_text(encoding="utf-8"))
         if existing != splits:
@@ -57,4 +60,7 @@ def main():
     print(f"Train: {len(splits['train'])}, Val: {len(splits['val'])}, Test: {len(splits['test'])}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Generate reproducible dataset splits.")
+    parser.add_argument("--output", type=Path, default=Path("splits.json"))
+    args = parser.parse_args()
+    main(args.output)

@@ -36,9 +36,9 @@ def _run(args: list[str], description: str) -> None:
     print(f"{'='*60}")
     result = subprocess.run([sys.executable] + args, check=False)
     if result.returncode != 0:
-        print(f"\n❌  Step failed (exit {result.returncode}): {description}")
+        print(f"\nFAILED (exit {result.returncode}): {description}")
         sys.exit(result.returncode)
-    print(f"✅  Done: {description}")
+    print(f"DONE: {description}")
 
 
 def main() -> None:
@@ -69,7 +69,10 @@ def main() -> None:
     args = parser.parse_args()
 
     # ── Step 1: generate splits ────────────────────────────────────────────────
-    _run(["generate_splits.py"], "Generate train/val/test splits")
+    _run(
+        ["generate_splits.py", "--output", str(args.splits)],
+        "Generate train/val/test splits",
+    )
 
     # ── Step 2: train ─────────────────────────────────────────────────────────
     if not args.skip_train:
@@ -92,6 +95,7 @@ def main() -> None:
             "bootstrap_labels_corrected.json",
             str(args.splits),
             str(args.output),
+            "--full-dataset",
         ],
         "Build reference_stats.json + expected_clauses.json from training split",
     )
