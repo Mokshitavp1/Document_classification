@@ -17,6 +17,9 @@
 - Hardened split generation for document types with fewer than four examples.
 - Added regression coverage for custom split paths and small-class splitting.
 - Cleared the remaining Pylance diagnostic in the weighted trainer.
+- Fixed Windows CP1252 pipeline output by using ASCII-safe status messages.
+- Fixed artifact generation to use the combined dataset represented by splits.
+- Batched sentence-transformer embeddings when building reference statistics.
 
 Assumptions: adjacent same-type predictions are one clause when merging windows;
 document classification remains limited to the first 512 tokens as specified.

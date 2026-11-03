@@ -84,3 +84,22 @@ def test_reference_stats_with_fewer_than_five_examples_is_not_flagged():
         reference_stats=stats,
     )
     assert result[0]["flagged_unusual"] is False
+
+
+def test_reference_stats_uses_batch_embedder():
+    calls = []
+
+    def embed(text):
+        raise AssertionError("batch embedder should be preferred")
+
+    def batch_embed(texts):
+        calls.append(list(texts))
+        return [[1.0, 0.0] for _ in texts]
+
+    embed.batch_embed = batch_embed
+    stats = build_clause_reference_stats(
+        {"confidentiality": [{"clause_text": "one"}, {"clause_text": "two"}]},
+        embed,
+    )
+    assert calls == [["one", "two"]]
+    assert stats["confidentiality"]["count"] == 2
