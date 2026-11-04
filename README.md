@@ -1,10 +1,17 @@
 # Legal Document Classification and Clause Extraction
 
-This project fine-tunes Legal-BERT to:
+This project fine-tunes Legal-BERT to experiment with:
 
-1. classify a contract as `employment`, `rental`, `privacy`, `ip`, `service`, or
-   `nda`; and
-2. extract typed clause spans using BIO token classification.
+1. classify service and IP-related contracts; and
+2. extract nine CUAD-supported clause types using BIO token classification:
+   `termination`, `governing_law`, `liability_limitation`, `assignment`,
+   `non_compete`, `non_solicitation`, `ip_ownership`, `renewal`, and `warranty`.
+
+The code retains the original six-type/fifteen-label enum for compatibility with
+the data contracts and future reviewed annotations. The evidence-backed report
+scope is narrower because the available CUAD title-matched data contains 429
+service documents, 50 IP documents, and only one document each for employment,
+rental, privacy, and NDA.
 
 The public inference API is in [`legal_bert_model.py`](legal_bert_model.py), and
 the document-level response assembler is in
@@ -13,9 +20,12 @@ the document-level response assembler is in
 ## Status
 
 The software pipeline is runnable and reproducible. The checked-in checkpoint
-is a smoke-test/training artifact, not a claim of production accuracy. The
-current dataset has no examples for six clause types and the latest recorded
-evaluation reports classification macro-F1 `0.471` and clause-span F1 `0.0`.
+is a smoke-test/training artifact trained for one epoch on 30 documents, not a
+claim of production accuracy. Its first three training-document probes produced
+zero predicted clauses, so its clause score is a training failure signal rather
+than evidence that offset evaluation is correct. The latest recorded
+evaluation reports classification macro-F1 `0.471` versus a TF-IDF baseline of
+`0.571`, and clause-span F1 `0.0`.
 See [`DATASET_REPORT.md`](DATASET_REPORT.md) and
 [`evaluation_results.json`](evaluation_results.json) before using the model.
 
@@ -50,6 +60,11 @@ training-only reference artifacts, and evaluates the held-out test set:
 ```powershell
 python run_pipeline.py --epochs 3 --baseline tfidf
 ```
+
+For a reportable run, omit `--max-train-docs` and use the full 339-document
+training split. GPU execution on Colab or Kaggle is recommended. Evaluation
+records the training manifest and marks results as `is_smoke_test` when the
+checkpoint was trained on fewer documents than the configured split.
 
 Useful options:
 
@@ -101,8 +116,10 @@ and any expected clause types missing from the result.
 
 CUAD provides useful coverage for service and IP-related agreements but does
 not provide balanced coverage for all six document types or all fifteen clause
-types. Add reviewed annotations and regenerate the dataset report before
-making accuracy claims.
+types. The pending bootstrap annotations are not included because they have not
+been reviewed. Add reviewed annotations, train on the full split, probe training
+documents for non-empty predictions, and regenerate the dataset report before
+making broader accuracy claims.
 
 ## Project contracts
 

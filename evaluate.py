@@ -14,7 +14,7 @@ from sklearn.metrics import classification_report, f1_score
 from sklearn.pipeline import make_pipeline
 
 from dataset_prep import get_full_dataset
-from legal_bert_model import classify_document, extract_clauses
+from legal_bert_model import CHECKPOINT_PATH, classify_document, extract_clauses
 
 
 def _span_key(span: Mapping[str, Any]) -> tuple[str, int, int]:
@@ -95,6 +95,13 @@ def evaluate_baseline(
 
 def evaluate(splits_path: str = "splits.json", baseline: str | None = None) -> dict[str, Any]:
     splits = json.loads(Path(splits_path).read_text(encoding="utf-8"))
+    manifest_path = CHECKPOINT_PATH / "training_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"Training manifest not found at {manifest_path}. "
+            "Evaluate a trained checkpoint with its manifest."
+        )
+    training_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     all_documents = get_full_dataset()
     documents = {doc["document_name"]: doc for doc in all_documents}
     missing = [name for names in splits.values() for name in names if name not in documents]
@@ -112,6 +119,15 @@ def evaluate(splits_path: str = "splits.json", baseline: str | None = None) -> d
         spans_by_type[document["document_type"]]["gold"].extend(document["clauses"])
         spans_by_type[document["document_type"]]["predicted"].extend(predicted)
     result: dict[str, Any] = {
+        "evaluation_context": {
+            "split_counts": {name: len(names) for name, names in splits.items()},
+            "checkpoint_path": str(CHECKPOINT_PATH),
+            "training_manifest": training_manifest,
+            "is_smoke_test": (
+                training_manifest.get("counts", {}).get("train")
+                != len(splits["train"])
+            ),
+        },
         "classification_macro_f1": float(f1_score(actual_types, predicted_types, average="macro")),
         "classification_report": classification_report(actual_types, predicted_types, output_dict=True, zero_division=0),
         "clause_spans_overall": span_metrics(

@@ -20,6 +20,10 @@
 - Fixed Windows CP1252 pipeline output by using ASCII-safe status messages.
 - Fixed artifact generation to use the combined dataset represented by splits.
 - Batched sentence-transformer embeddings when building reference statistics.
+- Narrowed the evidence-backed report scope to service/IP documents and the nine
+  CUAD-supported clause types; retained broader enums for compatibility.
+- Added evaluation metadata that records the checkpoint manifest and flags
+  evaluations made with a smoke-test-sized training artifact.
 
 Assumptions: adjacent same-type predictions are one clause when merging windows;
 document classification remains limited to the first 512 tokens as specified.
