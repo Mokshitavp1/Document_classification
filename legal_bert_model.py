@@ -61,9 +61,19 @@ def extract_clauses(text: str, document_name: str = "uploaded_document") -> list
     encoded.pop("special_tokens_mask", None)
     encoded.pop("overflow_to_sample_mapping", None)
     window_count = encoded["input_ids"].shape[0]
+    model_inputs = {
+        key: value for key, value in encoded.items()
+        if key in {"input_ids", "attention_mask", "token_type_ids"}
+    }
+    logits_batches = []
     with torch.inference_mode():
-        predictions = model(**encoded).logits
-    probabilities = torch.softmax(predictions, dim=-1)
+        for batch_start in range(0, window_count, 8):
+            batch_inputs = {
+                key: value[batch_start:batch_start + 8]
+                for key, value in model_inputs.items()
+            }
+            logits_batches.append(model(**batch_inputs).logits.cpu())
+    probabilities = torch.softmax(torch.cat(logits_batches, dim=0), dim=-1)
     window_spans: list[dict[str, Any]] = []
     for window_index in range(window_count):
         active: dict[str, Any] | None = None

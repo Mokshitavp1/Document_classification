@@ -22,7 +22,7 @@ from transformers import (
 )
 
 from contract_constants import CLAUSE_TYPES, DOCUMENT_TYPES
-from dataset_prep import get_full_dataset
+from dataset_prep import get_full_dataset, is_excluded_from_training
 from windowing import assign_bio_labels
 
 SEED = 42
@@ -51,6 +51,17 @@ def build_training_examples(documents: list[dict], splits: dict[str, list[str]])
     missing = set(sum(splits.values(), [])) - set(by_name)
     if missing:
         raise ValueError(f"splits.json references missing documents, e.g. {next(iter(missing))}")
+    excluded = [
+        name
+        for names in splits.values()
+        for name in names
+        if is_excluded_from_training(name)
+    ]
+    if excluded:
+        raise ValueError(
+            "splits.json contains synthetic documents excluded from training: "
+            f"{', '.join(sorted(excluded))}"
+        )
     return {split: [by_name[name] for name in names] for split, names in splits.items()}
 
 
@@ -163,7 +174,9 @@ class WeightedTokenTrainer(Trainer):
         self.class_weights = class_weights
 
     def compute_loss(self, model: Any, inputs: dict[str, Any], return_outputs: bool = False, **kwargs: Any) -> Any:
-        del kwargs
+        # Transformers 5 passes num_items_in_batch; the weighted loss is
+        # token-normalized by CrossEntropyLoss, so that value is not needed.
+        kwargs.pop("num_items_in_batch", None)
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         loss = torch.nn.CrossEntropyLoss(

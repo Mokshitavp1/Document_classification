@@ -24,6 +24,8 @@
   CUAD-supported clause types; retained broader enums for compatibility.
 - Added evaluation metadata that records the checkpoint manifest and flags
   evaluations made with a smoke-test-sized training artifact.
+- Scoped clause span evaluation to document names and batched long-document
+  clause inference in groups of eight windows to reduce memory use.
 
 Assumptions: adjacent same-type predictions are one clause when merging windows;
 document classification remains limited to the first 512 tokens as specified.

@@ -106,6 +106,8 @@ and any expected clause types missing from the result.
 ## Data and artifacts
 
 - `bootstrap_labels_corrected.json` is the reviewed custom annotation input.
+- Its three `dummy_*` fixture documents remain available for diagnostics but
+  are excluded from generated training and evaluation splits.
 - `bootstrap_labels_pending_review.json` is not training data and remains
   ignored until manually reviewed.
 - `splits.json` fixes the train/validation/test assignment.

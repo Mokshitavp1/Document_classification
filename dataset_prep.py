@@ -18,6 +18,12 @@ CUAD_JSON_URL = (
     "https://huggingface.co/datasets/theatticusproject/cuad/"
     "resolve/main/CUAD_v1/CUAD_v1.json"
 )
+EXCLUDED_TRAINING_DOCUMENT_PREFIXES = ("dummy_",)
+
+
+def is_excluded_from_training(document_name: str) -> bool:
+    """Return whether a synthetic fixture must be kept out of model training."""
+    return document_name.casefold().startswith(EXCLUDED_TRAINING_DOCUMENT_PREFIXES)
 
 
 def map_cuad_question_to_clause_type(question: str) -> str | None:
@@ -279,7 +285,14 @@ def print_dataset_diagnostics(documents: list[dict[str, Any]]) -> None:
         for document in documents
         for clause in document.get("clauses", [])
     )
+    generic_counts = sum(
+        1
+        for document in documents
+        if (_match := _document_type_match(document["document_name"])) is not None
+        and _match[1] == "generic"
+    )
     print("Document types:", dict(document_counts))
+    print(f"Documents labeled only by generic keywords (weak): {generic_counts}")
     print("Clause types:", dict(clause_counts))
     print(
         "Clause types with zero examples:",
@@ -398,8 +411,18 @@ def write_dataset_report(documents: list[dict[str, Any]], path: str = "DATASET_R
         report.write("\n## Missing and low-coverage clause types\n\n")
         report.write(f"- Zero examples: {', '.join(zero) or 'None'}\n")
         report.write(f"- Fewer than 20 examples: {', '.join(low) or 'None'}\n")
-        cuad_title_counts = _cuad_title_classification_counts(_load_cuad_articles())
+        articles = _load_cuad_articles()
+        cuad_title_counts = _cuad_title_classification_counts(articles)
         report.write("\n## Title-based document-type facts\n\n")
+        report.write(
+            f"- Total CUAD contracts examined: {len(articles)}\n"
+            f"- Contracts included (matched title keywords): {len(documents)}\n"
+            f"- Contracts excluded because the title matched nothing: {cuad_title_counts['unmatched']}\n"
+            f"- Contracts labeled only by generic keywords (`agreement`, `contract`): {cuad_title_counts['generic_only']}\n"
+            f"- Contracts labeled by specific keywords: {len(documents) - cuad_title_counts['generic_only']} "
+            f"(service: {cuad_title_counts['service']}, ip: {cuad_title_counts['ip']}, nda: {cuad_title_counts['nda']}, "
+            f"employment: {cuad_title_counts['employment']}, rental: {cuad_title_counts['rental']}, privacy: {cuad_title_counts['privacy']})\n\n"
+        )
         report.write(
             "The title heuristic found "
             f"{cuad_title_counts['nda']} NDA, {cuad_title_counts['employment']} employment, "
@@ -412,15 +435,18 @@ def write_dataset_report(documents: list[dict[str, Any]], path: str = "DATASET_R
         report.write("\n## Changes and remaining problems\n\n")
         report.write(
             "- Loaded only CUAD contracts whose titles matched a document-type keyword and "
-            "skipped contracts whose titles matched nothing.\n"
+            "skipped contracts whose titles matched nothing (unmatched titles return None).\n"
             "- Used word-boundary regexes with specific title signals before generic agreement "
             "and contract signals.\n"
+            "- Kept generic-keyword matches (`agreement`, `contract`) as `service` but counted and "
+            "reported them separately as weak signals.\n"
             "- Kept only CUAD categories that directly represent our clause types; confidentiality, "
             "indemnification, payment_terms, data_processing, dispute_resolution, and "
             "force_majeure remain unmapped because CUAD has no matching category.\n"
             "- CUAD has very few title-identifiable NDA, employment, and rental contracts; "
             "generic agreement/contract matches are reported separately and are not treated "
             "as stronger evidence.\n"
+            "- No contracts were relabeled to artificially inflate counts.\n"
             "- Remaining problem: title heuristics exclude contracts with no matching title "
             "keyword, so the filtered dataset is not all CUAD contracts.\n"
         )

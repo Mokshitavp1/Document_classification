@@ -17,11 +17,18 @@ from dataset_prep import get_full_dataset
 from legal_bert_model import CHECKPOINT_PATH, classify_document, extract_clauses
 
 
-def _span_key(span: Mapping[str, Any]) -> tuple[str, int, int]:
-    return span["clause_type"], span["span_start"], span["span_end"]
+def _span_key(span: Mapping[str, Any]) -> tuple[str, str, int, int]:
+    return (
+        span.get("document_name", ""),
+        span["clause_type"],
+        span["span_start"],
+        span["span_end"],
+    )
 
 
 def _iou(left: Mapping[str, Any], right: Mapping[str, Any]) -> float:
+    if left.get("document_name", "") != right.get("document_name", ""):
+        return 0.0
     intersection = max(0, min(left["span_end"], right["span_end"]) - max(left["span_start"], right["span_start"]))
     union = max(left["span_end"], right["span_end"]) - min(left["span_start"], right["span_start"])
     return intersection / union if union else 0.0
@@ -37,7 +44,7 @@ def span_metrics(
     gold_spans: Iterable[Mapping[str, Any]],
     predicted_spans: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Compute exact and IoU>=0.5 clause metrics by clause type."""
+    """Compute document-scoped exact and IoU>=0.5 clause metrics."""
     gold = list(gold_spans)
     predicted = list(predicted_spans)
     types = sorted({span["clause_type"] for span in gold + predicted})
@@ -49,7 +56,11 @@ def span_metrics(
         gold_keys = {_span_key(span) for span in gold_type}
         exact_tp = sum(_span_key(span) in gold_keys for span in predicted_type)
         lenient_tp = sum(
-            any(_iou(predicted_span, gold_span) >= 0.5 for gold_span in gold_type)
+            any(
+                predicted_span.get("document_name", "") == gold_span.get("document_name", "")
+                and _iou(predicted_span, gold_span) >= 0.5
+                for gold_span in gold_type
+            )
             for predicted_span in predicted_type
         )
         exact_by_type[clause_type] = _prf(exact_tp, len(predicted_type), len(gold_type))
@@ -116,7 +127,10 @@ def evaluate(splits_path: str = "splits.json", baseline: str | None = None) -> d
         predicted = extract_clauses(document["text"], document["document_name"])
         actual_types.append(document["document_type"])
         predicted_types.append(classification["document_type"])
-        spans_by_type[document["document_type"]]["gold"].extend(document["clauses"])
+        spans_by_type[document["document_type"]]["gold"].extend(
+            {**span, "document_name": document["document_name"]}
+            for span in document["clauses"]
+        )
         spans_by_type[document["document_type"]]["predicted"].extend(predicted)
     result: dict[str, Any] = {
         "evaluation_context": {

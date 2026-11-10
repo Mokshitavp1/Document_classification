@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
-from dataset_prep import get_full_dataset
+from dataset_prep import get_full_dataset, is_excluded_from_training
 
 def main(output: Path = Path("splits.json")) -> None:
     print("Loading full dataset to extract document names...")
@@ -16,8 +16,17 @@ def main(output: Path = Path("splits.json")) -> None:
 
     documents_by_type = defaultdict(list)
     for doc in dataset:
+        if is_excluded_from_training(doc["document_name"]):
+            print(f"Excluding synthetic document from splits: {doc['document_name']}")
+            continue
         documents_by_type[doc["document_type"]].append(doc["document_name"])
-    doc_names = list(set(doc["document_name"] for doc in dataset))
+    doc_names = list(
+        set(
+            doc["document_name"]
+            for doc in dataset
+            if not is_excluded_from_training(doc["document_name"])
+        )
+    )
     print(f"Found {len(doc_names)} unique documents.")
     
     if not doc_names:

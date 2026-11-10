@@ -70,3 +70,6 @@ The title heuristic found 1 NDA, 0 employment, and 0 rental contracts. 166 contr
   held-out evaluation.
 - The 42 pending bootstrap annotations are excluded until reviewed; they are
   not evidence for the missing document categories.
+- The three reviewed `dummy_*` documents remain in the combined dataset for
+  diagnostics and traceability, but split generation excludes them from
+  training and evaluation because they are synthetic fixtures.
